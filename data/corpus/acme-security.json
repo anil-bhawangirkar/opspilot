@@ -1,0 +1,7 @@
+{
+  "document_id": "security-note", "tenant_id": "acme", "version": 1,
+  "title": "Restricted identity rotation note", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "security",
+  "status": "active", "effective_from": "2026-10-01", "effective_to": null,
+  "text": "# Restricted security procedure\n\nSecurity reviewers must approve publisher identity rotation. Restricted reference: ACME-SECURITY-ONLY."
+}

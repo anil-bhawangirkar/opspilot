@@ -1,0 +1,7 @@
+{
+  "document_id": "publication-runbook", "tenant_id": "acme", "version": 2,
+  "title": "Image publication runbook for release 2.7", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "operators",
+  "status": "active", "effective_from": "2026-10-01", "effective_to": null,
+  "text": "# Publication failures in release 2.7\n\nPUB-403 indicates that the image publisher lacks the artifact registry publish permission.\n\nIn release 2.7, restarting workers does not repair a registry authorization failure.\n\nCompare the publisher identity policy with the registry publish permission before proposing a mitigation.\n\nA deployment preceding an error spike establishes correlation, not a confirmed root cause."
+}

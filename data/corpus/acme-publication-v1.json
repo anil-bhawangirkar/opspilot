@@ -1,0 +1,7 @@
+{
+  "document_id": "publication-runbook", "tenant_id": "acme", "version": 1,
+  "title": "Image publication runbook (superseded)", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "operators",
+  "status": "superseded", "effective_from": "2025-01-01", "effective_to": "2026-10-01",
+  "text": "# Old publication guidance\n\nFor PUB-403 publication failures, restart the workers. This obsolete advice does not apply to release 2.7."
+}

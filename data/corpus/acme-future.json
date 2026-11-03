@@ -1,0 +1,7 @@
+{
+  "document_id": "future-runbook", "tenant_id": "acme", "version": 1,
+  "title": "Unreleased publication design", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "operators",
+  "status": "active", "effective_from": "2099-01-01", "effective_to": null,
+  "text": "# Future workers\n\nFor PUB-403, future workers will automatically repair every publication error. This document is not yet effective."
+}

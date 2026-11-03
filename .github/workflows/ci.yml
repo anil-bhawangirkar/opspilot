@@ -1,0 +1,43 @@
+name: increment-1
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q -m "not postgres"
+      - run: uv run incidentops demo
+      - run: uv run incidentops ingest
+      - run: uv run incidentops evaluate --output results/dev.json
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.7-pg17-bookworm
+        env:
+          POSTGRES_USER: incidentops
+          POSTGRES_PASSWORD: incidentops
+          POSTGRES_DB: incidentops_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U incidentops -d incidentops_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run pytest -q -m postgres
+        env:
+          INCIDENTOPS_TEST_POSTGRES_URL: postgresql://incidentops:incidentops@localhost:5432/incidentops_test

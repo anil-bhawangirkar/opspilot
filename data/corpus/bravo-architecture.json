@@ -1,0 +1,7 @@
+{
+  "document_id": "publisher-architecture", "tenant_id": "bravo", "version": 1,
+  "title": "Bravo publication architecture", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "operators",
+  "status": "active", "effective_from": "2026-10-01", "effective_to": null,
+  "text": "# Bravo architecture\n\nBravo isolates image manifests using a tenant-specific registry namespace. Its namespace configuration differs from Acme."
+}

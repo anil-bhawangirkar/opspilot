@@ -1,0 +1,7 @@
+{
+  "document_id": "rollback-compatibility", "tenant_id": "acme", "version": 1,
+  "title": "Rollback compatibility for release 2.7", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "operators",
+  "status": "active", "effective_from": "2026-10-01", "effective_to": null,
+  "text": "# Compatibility prerequisites\n\nRollback from release 2.7 to 2.6 is permitted only if the publication schema migration has not completed.\n\nMigration status must be checked using a live diagnostic tool; this document does not report the current migration state.\n\n| Release | Target | Prerequisite |\n| 2.7 | 2.6 | Publication schema migration incomplete |\n\nThis knowledge assistant cannot execute a rollback or establish live rollback eligibility."
+}

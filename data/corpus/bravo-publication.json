@@ -1,0 +1,7 @@
+{
+  "document_id": "publication-runbook", "tenant_id": "bravo", "version": 1,
+  "title": "Bravo registry namespace runbook", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "operators",
+  "status": "active", "effective_from": "2026-10-01", "effective_to": null,
+  "text": "# Bravo publication failures\n\nFor Bravo, PUB-403 indicates that the publisher is targeting the wrong registry namespace.\n\nBravo operators must check the tenant-specific namespace mapping. Bravo incident reference: BRAVO-ONLY-742."
+}

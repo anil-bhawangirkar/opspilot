@@ -1,0 +1,7 @@
+{
+  "document_id": "publisher-architecture", "tenant_id": "acme", "version": 1,
+  "title": "NimbusCloud publication architecture", "service": "image-publisher",
+  "region": "west", "release": "2.7", "access_group": "operators",
+  "status": "active", "effective_from": "2026-10-01", "effective_to": null,
+  "text": "# Publication flow\n\nThe image publisher transfers signed image manifests to the artifact registry after a successful image build.\n\nWorkers build images; the publisher identity is independently authorized to publish registry manifests.\n\n# Synthetic support contact\n\nContact alice@example.test with api_key=synthetic-secret-123. Example diagnostic client: 192.0.2.99. All identities and credentials in this corpus are fictional."
+}

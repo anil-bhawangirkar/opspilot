@@ -1,0 +1,37 @@
+services:
+  db:
+    image: pgvector/pgvector:0.8.7-pg17-bookworm
+    environment:
+      POSTGRES_USER: incidentops
+      POSTGRES_PASSWORD: incidentops
+      POSTGRES_DB: incidentops
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U incidentops -d incidentops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  api:
+    build: .
+    environment:
+      INCIDENTOPS_PROVIDER: ${INCIDENTOPS_PROVIDER:-fake}
+      INCIDENTOPS_DATABASE_URL: postgresql://incidentops:incidentops@db:5432/incidentops
+      INCIDENTOPS_ACME_TOKEN: ${INCIDENTOPS_ACME_TOKEN:-acme-demo-token}
+      INCIDENTOPS_BRAVO_TOKEN: ${INCIDENTOPS_BRAVO_TOKEN:-bravo-demo-token}
+      INCIDENTOPS_CHAT_MODEL: ${INCIDENTOPS_CHAT_MODEL:-gpt-4.1-mini}
+      INCIDENTOPS_EMBEDDING_MODEL: ${INCIDENTOPS_EMBEDDING_MODEL:-text-embedding-3-small}
+      INCIDENTOPS_EMBEDDING_DIMENSIONS: ${INCIDENTOPS_EMBEDDING_DIMENSIONS:-1536}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      INCIDENTOPS_TRACING: ${INCIDENTOPS_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      INCIDENTOPS_TRACE_PROJECT: ${INCIDENTOPS_TRACE_PROJECT:-incidentops-increment-1}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  pgdata:

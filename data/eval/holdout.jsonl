@@ -1,0 +1,2 @@
+{"id":"architecture-flow","family":"architecture","tenant_id":"acme","question":"What does the image publisher do?","answerable":true,"required_documents":["publisher-architecture"],"required_quotes":["transfers signed image manifests"],"forbidden_text":["BRAVO-ONLY"]}
+{"id":"architecture-unknown","family":"architecture","tenant_id":"bravo","question":"Which CPU model builds image manifests?","answerable":false,"required_documents":[],"required_quotes":[],"forbidden_text":[]}
