@@ -80,10 +80,10 @@ sequenceDiagram
     A->>A: Authenticate, validate and redact
     A->>O: Store immutable redacted artifact
     O-->>A: Exact version, size and SHA-256
-    A->>D: Capture head revision; commit job and outbox
+    A->>D: Capture head revision and commit job and outbox
     D-->>A: Existing or newly accepted job
     A-->>C: 202 and polling Location
-    P->>D: Recover leases; read eligible outbox
+    P->>D: Recover leases and read eligible outbox
     P->>B: Publish job UUID to selected queue
     B-->>P: Publisher confirmation
     P->>D: Mark outbox published
@@ -101,7 +101,7 @@ sequenceDiagram
         end
         W->>V: Idempotent generation/chunk upsert
     end
-    W->>D: Verify fence and completeness; CAS active head and succeed
+    W->>D: Verify fence and completeness, CAS active head and succeed
     C->>A: Poll job or replay progress events
     A->>D: Authorized job/result lookup
     A-->>C: Current status and safe result
@@ -128,7 +128,7 @@ sequenceDiagram
     A->>D: Commit redacted question, job and outbox
     A-->>C: 202 and Location
     B->>W: Deliver persisted job UUID
-    W->>D: Claim lease; load current authorized generations
+    W->>D: Claim lease and load current authorized generations
     alt No eligible evidence
         W->>D: Persist insufficient-evidence assessment
     else Eligible evidence exists

@@ -91,4 +91,11 @@ For the retained baseline, use the [v1 guide](docs/guides/legacy-v1.md), [v1 lea
 
 Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest -q`. The [verification record](docs/verification-v2.md) distinguishes passing local tests from unrun PostgreSQL/RabbitMQ/cloud integrations. Tiny fake datasets and local timings do not establish semantic quality, distributed throughput or HA.
 
+CI also parses every Mermaid diagram using `scripts/check-mermaid.mjs`. To run locally without adding Node dependencies to this Python project:
+
+```bash
+npm install --prefix /tmp/incidentops-mermaid --no-audit --no-fund mermaid@11.4.1 jsdom@26.1.0
+node scripts/check-mermaid.mjs /tmp/incidentops-mermaid/node_modules
+```
+
 Next stages include Redis global quotas/fair scheduling, queue admission, semantic reranking/judges, actual token/cost accounting, production identity/RLS, persistent LangGraph investigations and approved simulator actions. [Production design](docs/production-design.md) describes the target; it must be read alongside the implemented boundary above.

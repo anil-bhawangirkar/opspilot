@@ -3,6 +3,17 @@ on: [push, pull_request]
 permissions:
   contents: read
 jobs:
+  diagrams:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated diagram validator
+        run: npm install --prefix "$RUNNER_TEMP/incidentops-mermaid" --no-audit --no-fund mermaid@11.4.1 jsdom@26.1.0
+      - name: Parse every documented Mermaid diagram
+        run: node scripts/check-mermaid.mjs "$RUNNER_TEMP/incidentops-mermaid/node_modules"
   offline:
     runs-on: ubuntu-latest
     steps:
