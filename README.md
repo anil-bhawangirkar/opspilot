@@ -1,163 +1,94 @@
 # IncidentOps
 
-**An evidence-grounded cloud incident investigation learning project.** Built for a senior cloud engineer studying production AI decisions and preparing for Staff/Principal interviews.
+An evidence-grounded incident investigation learning project for senior engineers preparing for Staff/Principal AI interviews.
 
-The fictional NimbusCloud image publisher starts failing after release 2.7. Runbooks disagree, another tenant has a similar error with a different explanation, and rollback has a migration prerequisite. IncidentOps finds **applicable, authorized documentation** and exposes supporting evidence.
+The fictional NimbusCloud image publisher starts failing after deployment 2.7. IncidentOps retrieves applicable runbooks and historical evidence for two fictional tenants, validates quoted support and persists results for authorized inspection. All supplied data is synthetic; there are no real infrastructure mutations.
 
-**This checkout implements increment 1 only:** single-turn, extractive RAG with verified source quotes, explicit abstention and privacy-limited traces. It does not inspect live infrastructure, determine an actual incident root cause, or execute recovery actions. The [seven-increment roadmap](docs/roadmap.md) maps the remaining requested topics to later exercises.
+The main path is **v2 durable asynchronous RAG**. It stores ingestion and answer jobs before background execution, stages document updates, combines dense retrieval with BM25 and releases validated citations. The original v1 synchronous LangGraph baseline remains available for comparison.
 
-## Available paths
+## Run the free demo
 
-| Path | Components | What it proves |
-|---|---|---|
-| Free offline default | FastAPI, LangChain interfaces, LangGraph, SQLite exact vector search, hashed embeddings and scripted quote selector | Repeatable application and policy behavior; **not LLM quality** |
-| PostgreSQL lab | Same application with PostgreSQL and pgvector exact cosine search | Real SQL/vector integration when its integration test runs |
-| Opt-in live model | OpenAI embeddings and structured generation through LangChain; optional LangSmith | Model behavior on the small synthetic dataset you actually evaluate |
-
-Eight documents cover two tenants, superseded and future runbooks, restricted notes and synthetic sensitive text. No real resume, company runbook, credentials or incident data is included.
-
-## 1. Install and run the free demo
-
-Prerequisites: Python 3.12+ and [uv](https://docs.astral.sh/uv/getting-started/installation/). Run commands from the repository root. Installation downloads dependencies; fake-provider execution makes no model or tracing calls.
+Prerequisites: Python **3.12–3.14** and [uv](https://docs.astral.sh/uv/getting-started/installation/). Run from the repository root:
 
 ```bash
-cd /Users/anilbhawangirkar/oci-repos/project/opspilot
-uv sync --frozen --python 3.12
-cp .env.example .env
-uv run incidentops demo
-```
-
-The demo always uses temporary SQLite storage, fake providers and tracing disabled, even if `.env` selects a live model. Expect a quoted answer for PUB-403 and an abstention for “Is rollback safe to execute now?”. It creates no persistent corpus.
-
-After cloning elsewhere, replace the `cd` path with your clone location. `uv.lock` pins the resolved Python dependencies; use `--frozen` for reproducible installation.
-
-## 2. Ingest and ask questions
-
-Keep the default fake/SQLite configuration initially:
-
-```bash
-uv run incidentops ingest
-uv run incidentops ask "What does PUB-403 mean in release 2.7?"
-uv run incidentops ask "What does PUB-403 mean?" --tenant bravo
-uv run incidentops ask "What is the rollback prerequisite for release 2.7?"
-uv run incidentops ask "What is the CEO's favourite sandwich?"
-```
-
-`ingest` atomically replaces the entire fixture corpus. Repeating it preserves chunk IDs. Editing source text requires a new `version`; changing its ACL takes effect on reingestion. The CLI is a trusted local operator tool and can select tenants. Remote callers use authenticated API tokens.
-
-Output contains `status`, `reason`, `mode`, quoted `claims`, versioned citations, retrieved source references and timing/context metrics. `answered` means the provider selected quotes that passed textual validation. It does **not** establish source truth, relevance, completeness, causality or live rollback safety.
-
-## 3. Start the API
-
-```bash
-uv run incidentops serve
-```
-
-In a second terminal:
-
-```bash
-curl -s http://127.0.0.1:8000/healthz
-curl -s http://127.0.0.1:8000/v1/ask \
-  -H 'Authorization: Bearer acme-demo-token' \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"What does PUB-403 mean in release 2.7?"}'
-```
-
-Open [interactive API documentation](http://127.0.0.1:8000/docs), select **Authorize**, enter `acme-demo-token`, and try `/v1/ask`. Inspect a citation by calling its `source_url` with the same bearer token. Bravo's token is `bravo-demo-token`; a cross-tenant source lookup returns 404. The question body cannot choose a tenant or override document permissions.
-
-These are local fixture credentials. Change both tokens in `.env` before shared use. Authentication is a small configured-token adapter; OIDC, rate limits, row-level security and deployment hardening remain future work.
-
-## 4. Run tests and evaluation
-
-```bash
+uv sync --frozen
+uv run incidentops-workflow demo
 uv run pytest -q
-uv run ruff check .
-uv run ruff format --check .
-uv run incidentops evaluate --output results/dev.json
-uv run incidentops evaluate --dataset data/eval/holdout.jsonl --output results/holdout.json
 ```
 
-Evaluation requires ingestion from step 2. Exit code 1 means a failed case; 2 means a command/configuration error. Reports include answerability accuracy, citation integrity, required-document recall and measured local p50/p95 latency. `quality_evidence=false` identifies fake runs. Billed tokens and cost are `null`; a context byte bound is not a billable token count. This small learning dataset is not a benchmark.
+The demo always uses fake providers, temporary SQLite and local objects with tracing disabled. It runs actual migrations, ingests current operator-visible fixtures, answers PUB-403 and demonstrates that executing the completed job again does no work. No model key or broker is needed. Installation downloads dependencies; fake execution makes no model calls. A fake test passing is evidence of mechanics, not answer quality.
 
-Tests exercise ACLs, stale/future sources, versioning, forged quotes, missing evidence, malformed outputs, provider failure, redaction, context limits and trace exports. PostgreSQL tests skip without an explicitly configured disposable database. See [verification results](docs/verification.md).
+For persistent state and API requests, follow the [step-by-step v2 setup](docs/guides/production-s2-s3.md#2-persistent-local-path-without-a-broker). It covers `migrate`, `seed-local`, `serve`, submitting a job, running its worker and polling. A public submission returns **202 + Location**; a worker must execute it before an answer is available.
 
-## 5. Use PostgreSQL and pgvector
+## Current flow
 
-Install Docker with Compose support. The database binds to localhost and uses development credentials.
+```mermaid
+flowchart LR
+    C[Authenticated client] --> A[FastAPI job submission]
+    A --> D[Database jobs and outbox]
+    D --> P[Outbox dispatcher]
+    P --> B[RabbitMQ job UUID]
+    B --> W[Ingestion or answer worker]
+    W --> D
+    D --> R[Authorized polling and SSE]
+    R --> C
+```
+
+## Diagram Summary
+
+The database records accepted work and results; RabbitMQ wakes workers. Ingestion checkpoints batches and atomically promotes a document generation. Answer workers retrieve authorized evidence, call a model asynchronously and validate quotes. The free demo executes the same persisted jobs locally without a broker. See the [full architecture and sequence diagrams](docs/architecture.md).
+
+## Stack and implemented boundary
+
+| Area | Implemented choice |
+|---|---|
+| API and contracts | FastAPI, Pydantic, trusted demo-token identity, request bounds, async submission/polling/cancellation |
+| Source processing | LangChain `Document`, `RecursiveCharacterTextSplitter`, redaction, stable hashes/offsets, versioned source metadata |
+| Durable state | SQLAlchemy async + Alembic; PostgreSQL deployment, SQLite local tests |
+| Background execution | Celery/RabbitMQ, transactional outbox, separate small/large/answer queues, leases/fencing, finite retries and recovery |
+| Retrieval | Async vector-index protocol, pgvector HNSW/exact controls, Pinecone adapter, BM25+dense RRF, candidate/final top-k, exact-text deduplication |
+| Incremental ingestion | Staged generations, per-document revision CAS, persisted embedding batches and tenant/model/content-scoped embedding reuse |
+| Objects | Content-addressed local storage or versioned S3 adapter with checksums |
+| Models and diagnostics | Native async embedding/chat calls, deterministic fake mode, optional OpenAI, safe LangSmith summaries, persisted SSE progress |
+| Evaluation | Answerable/unanswerable fixtures, deterministic failure tests, configurable retrieval experiments, opt-in service tests |
+
+The retrieval-only API has a separate deployment entry point. Workers currently call its shared module in-process; remote authenticated routing is a later step. Semantic reranking has an injection port but is **disabled** in the supplied runtime. BM25 is a capped in-memory reference adapter.
+
+## Run the broker/PostgreSQL lab
+
+With Docker/Compose installed:
 
 ```bash
-docker compose up -d db
+INCIDENTOPS_PROVIDER=fake INCIDENTOPS_VECTOR_BACKEND=pgvector \
+  docker compose --profile workflows up --build -d workflow-api dispatcher ingest-small ingest-large investigations
+
+docker compose --profile workflows exec workflow-api incidentops-workflow enqueue-fixtures
 ```
 
-Set this in `.env`, keeping `INCIDENTOPS_PROVIDER=fake`:
+The workflow API is on localhost **8002**, the optional retrieval-only API on **8003**, and RabbitMQ management on **15672**. This is a single-instance lab. Follow the [full deployment/settings guide](docs/guides/production-s2-s3.md#3-real-broker-and-postgresql-path-using-compose) for dependencies, ports, optional Pinecone/S3 and service tests. Do not overwrite an existing `.env` when copying `.env.example`.
 
-```dotenv
-INCIDENTOPS_DATABASE_URL=postgresql://incidentops:incidentops@localhost:5432/incidentops
-```
+## Read and learn
 
-```bash
-uv run incidentops ingest
-uv run incidentops ask "Explain PUB-403"
-```
+| Document | Purpose |
+|---|---|
+| [Architecture](docs/architecture.md) | Current components, ingestion/answer sequences, trust and deployment boundaries |
+| [Low-level design](docs/low-level-design.md) | Actual tables, job states, interfaces, transactions, retrieval and failure rules |
+| [Production design](docs/production-design.md) | Technology decisions, alternatives and remaining scale/HA controls |
+| [V2 setup and failure lab](docs/guides/production-s2-s3.md) | Exact run commands and recovery exercises |
+| [Retrieval interview lab](docs/guides/retrieval-lab.md) | HNSW, RRF, top-k, duplicates, updates, grounding limits and model interview answers |
+| [ADR 0003](docs/adr/0003-durable-jobs-and-generations.md) | Why jobs, outbox, generations and replay have their current boundaries |
+| [Verification](docs/verification-v2.md) | Executed checks, measured fake results, skipped services and known limits |
+| [Troubleshooting](docs/guides/troubleshooting.md) | Setup, queued jobs, conflicts, sources and configuration |
+| [Active plan](docs/plans/production-evolution/2026-11-05-execplan.md) | Delivered stages and next acceptance gates |
+| [Learning roadmap](docs/roadmap.md) | Remaining RAG, graph, memory, action and evaluation exercises |
+| [Research](docs/research/production-sources.md) | Official sources behind the decisions |
 
-For a complete container path:
+`src/incidentops/durable/` contains the v2 API, repository, runtime, CLI and broker. `retrieval/` contains index contracts/adapters and hybrid fusion; `object_storage.py`, `chunking.py`, `models.py`, `providers.py`, `security.py` and `tracing.py` supply shared components. `migrations/`, `tests/` and `data/` contain schema revisions, checks and synthetic fixtures. `uv.lock` pins resolved dependencies.
 
-```bash
-docker compose build api
-docker compose run --rm api incidentops ingest
-docker compose up -d api
-```
+For the retained baseline, use the [v1 guide](docs/guides/legacy-v1.md), [v1 learning exercises](docs/guides/learning-lab.md) and [S1 migration](docs/guides/production-s1.md). `incidentops` runs v1; `incidentops-workflow` runs v2. Their source stores are separate.
 
-Compose connects the API container to `db:5432`. Stop any local API on port 8000 first. Ingestion is explicit: starting the API never silently makes embedding calls.
+## Verification and next stages
 
-Test pgvector against a separate database:
+Run `uv run ruff check .`, `uv run ruff format --check .` and `uv run pytest -q`. The [verification record](docs/verification-v2.md) distinguishes passing local tests from unrun PostgreSQL/RabbitMQ/cloud integrations. Tiny fake datasets and local timings do not establish semantic quality, distributed throughput or HA.
 
-```bash
-docker compose exec db createdb -U incidentops incidentops_test
-INCIDENTOPS_TEST_POSTGRES_URL=postgresql://incidentops:incidentops@localhost:5432/incidentops_test \
-  uv run pytest -q -m postgres
-```
-
-The test replaces its target corpus: use only the disposable test database. If it already exists, skip `createdb`. The pgvector image version is pinned; Python base images and CI actions are not digest-pinned. Production supply-chain hardening is out of scope.
-
-## 6. Opt in to a live model
-
-API calls cost money. Edit `.env`:
-
-```dotenv
-INCIDENTOPS_PROVIDER=openai
-OPENAI_API_KEY=your-local-api-key
-INCIDENTOPS_CHAT_MODEL=gpt-4.1-mini
-INCIDENTOPS_EMBEDDING_MODEL=text-embedding-3-small
-INCIDENTOPS_EMBEDDING_DIMENSIONS=1536
-INCIDENTOPS_DATABASE_URL=sqlite:///.local/openai.db
-```
-
-Use a **new database** for each embedding space. The SQLite URL above is a simple live-provider lab. For pgvector, create `incidentops_live` with `docker compose exec db createdb -U incidentops incidentops_live`, then use `postgresql://incidentops:incidentops@localhost:5432/incidentops_live` in `.env`.
-
-```bash
-uv run incidentops ingest
-uv run incidentops ask "What does PUB-403 mean in release 2.7?"
-uv run incidentops evaluate --output results/live-dev.json
-```
-
-There is no silent fake-provider fallback. Outages return `provider_error` or `retrieval_error` and fail evaluation. If your account lacks the configured model, select an available model supporting structured output and record it with your experiment. These defaults are starting configurations, not a best-model recommendation.
-
-Inside Compose, the database URL always targets `incidentops`. For a new embedding space, use a separate project/volume, e.g. `docker compose -p incidentops-live run --rm api incidentops ingest`, after stopping the old project's services to free ports. Never reuse the fake embedding index with a live model.
-
-## 7. Opt in to LangSmith
-
-Set `INCIDENTOPS_TRACING=true`, `LANGSMITH_API_KEY=your-local-key` and optionally `INCIDENTOPS_TRACE_PROJECT=incidentops-increment-1` in `.env`. Restart the API or run another CLI question. Tracing works with either provider.
-
-Find the response `run_id` in the configured project. The application exports status, counts and retrieval/generation/validation durations. It exports **no question, quote, source text, tenant, bearer token or exception payload**. Automatic nested tracing is disabled explicitly to keep raw graph state out of telemetry. This limits prompt-level debugging in exchange for a smaller privacy surface. See [tracing design](docs/low-level-design.md#tracing-and-sensitive-data).
-
-## Understand and explain it
-
-- [High-level architecture](docs/architecture.md): diagrams, boundaries and scaling tradeoffs.
-- [Low-level design](docs/low-level-design.md): schemas, SQL, graph nodes and failure behavior.
-- [Learning lab](docs/guides/learning-lab.md): code reading order, failure injection and interview Q&A.
-- [Architecture decisions](docs/adr/0001-grounded-baseline.md): rationale and alternatives.
-- [Roadmap](docs/roadmap.md): all remaining requested topics.
-- [Troubleshooting](docs/guides/troubleshooting.md) and [verification record](docs/verification.md).
-
-Stop after increment 1: run it, inspect every citation, break the controls, and explain the tradeoffs before adding hybrid retrieval or operational agents.
+Next stages include Redis global quotas/fair scheduling, queue admission, semantic reranking/judges, actual token/cost accounting, production identity/RLS, persistent LangGraph investigations and approved simulator actions. [Production design](docs/production-design.md) describes the target; it must be read alongside the implemented boundary above.

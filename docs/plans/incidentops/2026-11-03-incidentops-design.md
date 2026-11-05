@@ -1,5 +1,7 @@
 # IncidentOps increment 1 design
 
+Historical design for the original delivery. Its first-increment scope and manual chunking description are superseded by the [active production plan](../production-evolution/2026-11-05-execplan.md) and [current architecture](../../architecture.md). Retained to explain the design's evolution.
+
 The user supplied the IncidentOps design and asked to build it in this checkout. Its first-deliverable boundary is authoritative: implement grounded single-turn RAG only. The remaining six increments are a roadmap, not implemented features.
 
 ## Goal and alternatives

@@ -1,5 +1,7 @@
 # Increment 1 learning lab
 
+This is the retained **v1** exercise. Its setup/API commands are in the [legacy guide](legacy-v1.md); the current background workflow exercises are in the [v2 guide](production-s2-s3.md).
+
 Run every command from the repository root. Use fake mode and synthetic data until you can explain the entire request path. The goal is understanding and measurement, not memorizing framework names.
 
 ## 1. Understand the product decision
@@ -31,7 +33,7 @@ Draw the graph from memory. Explain why no reducer, checkpoint or memory store i
 
 ## 3. Inspect citations independently
 
-Start `uv run incidentops serve`, then use the API example in the README. Copy a `source_url` and fetch it using the same bearer token.
+Start `uv run incidentops serve`, then use the API example in the [legacy guide](legacy-v1.md#api-example). Copy a `source_url` and fetch it using the same bearer token.
 
 Check that the quote is present, the version is current, the content hash matches, and offsets refer to redacted text. Fetch the same source with Bravo's token and expect 404.
 
@@ -47,9 +49,9 @@ Why it matters: a valid-looking URL is not evidence that the claim came from the
 uv run pytest -q tests/test_chunking.py
 ```
 
-The regression test checks that the release heading stays with the PUB-403 explanation. During development, splitting every paragraph independently created a heading-only chunk. That heading ranked highly for a release-specific query while the answer paragraph fell outside top-k.
+The regression test checks that the release heading stays with the PUB-403 explanation. The early custom baseline split paragraphs independently, creating a heading-only retrieval failure. Production step S1 now uses LangChain's recursive splitter and retains the user-visible regression test.
 
-Inspect `chunk_document()`. Why pack paragraphs? To retain small units of meaning. Why cap them? To keep one source from consuming the context. Why not use larger chunks everywhere? Larger chunks dilute similarity and waste context, but too-small chunks lose prerequisites. Increment 2 must compare these choices using required evidence units rather than preference.
+Inspect `chunk_document()` as a compatibility facade, then `RecursiveDocumentChunker` in `chunking.py`. LangChain owns splitting/merging; our adapter owns redaction and provenance. Size and overlap are characters, not actual model tokens. Why not use larger chunks everywhere? Larger chunks can waste context, but too-small chunks lose prerequisites. Compare strategies using required evidence units rather than preference; see the new [S1 guide](production-s1.md).
 
 ## 5. Inject failure and inspect the result
 
@@ -102,7 +104,7 @@ The file named `holdout` demonstrates incident-family separation, but it is visi
 
 ## 8. Move to real components independently
 
-First run fake providers against real pgvector using the README steps. This isolates storage integration from model behavior. Then use a separate index with a live provider. Run exactly the same development cases and record actual failures, not just overall accuracy.
+First run fake providers against real pgvector using the [legacy setup steps](legacy-v1.md#postgresql-and-containers). This isolates storage integration from model behavior. Then use a separate index with a live provider. Run exactly the same development cases and record actual failures, not just overall accuracy.
 
 Enable LangSmith only after the local privacy tests pass. Inspect one run UUID and verify that only allowlisted fields appear. A test capture proves our export payload shape; only an actual service call proves credentials, permissions and remote ingestion work.
 

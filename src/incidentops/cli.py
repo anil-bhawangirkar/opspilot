@@ -8,8 +8,8 @@ import uvicorn
 
 from incidentops.config import Settings
 from incidentops.evaluation import evaluate
-from incidentops.factory import build_service
-from incidentops.ingestion import corpus_fingerprint, ingest
+from incidentops.factory import build_ingestion_service, build_service
+from incidentops.ingestion import corpus_fingerprint, load_documents
 from incidentops.models import Principal, Question
 
 
@@ -30,9 +30,7 @@ def run(args) -> int:
             settings.provider, settings.tracing = "fake", False
             settings.database_url = f"sqlite:///{temp}/demo.db"
             service = build_service(settings)
-            count = ingest(
-                settings.corpus_dir, service.store, service.embeddings, settings.chunk_tokens
-            )
+            count = build_ingestion_service(settings).ingest(load_documents(settings.corpus_dir))
             print(f"FAKE PROVIDER DEMO — {count} synthetic chunks; no LLM quality evidence")
             for question in (
                 "What does PUB-403 mean in release 2.7?",
@@ -43,11 +41,8 @@ def run(args) -> int:
                 )
                 _print({"question": question, **result.model_dump()})
         return 0
-    service = build_service(settings)
     if args.command == "ingest":
-        count = ingest(
-            settings.corpus_dir, service.store, service.embeddings, settings.chunk_tokens
-        )
+        count = build_ingestion_service(settings).ingest(load_documents(settings.corpus_dir))
         _print(
             {
                 "mode": settings.provider,
@@ -56,6 +51,7 @@ def run(args) -> int:
             }
         )
         return 0
+    service = build_service(settings)
     if args.command == "ask":
         principal = Principal(args.tenant, "local-cli-operator", ("operators",))
         result = service.ask(principal, Question(question=args.question, region=args.region))

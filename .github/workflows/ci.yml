@@ -1,4 +1,4 @@
-name: increment-1
+name: incidentops-checks
 on: [push, pull_request]
 permissions:
   contents: read
@@ -14,10 +14,11 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest -q -m "not postgres"
+      - run: uv run pytest -q -m "not postgres and not broker"
       - run: uv run incidentops demo
       - run: uv run incidentops ingest
       - run: uv run incidentops evaluate --output results/dev.json
+      - run: uv run incidentops-workflow demo
   postgres:
     runs-on: ubuntu-latest
     services:
@@ -41,3 +42,25 @@ jobs:
       - run: uv run pytest -q -m postgres
         env:
           INCIDENTOPS_TEST_POSTGRES_URL: postgresql://incidentops:incidentops@localhost:5432/incidentops_test
+  rabbitmq:
+    runs-on: ubuntu-latest
+    services:
+      rabbitmq:
+        image: rabbitmq:4.1-management
+        env:
+          RABBITMQ_DEFAULT_USER: incidentops
+          RABBITMQ_DEFAULT_PASS: incidentops
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run pytest -q -m broker
+        env:
+          INCIDENTOPS_TEST_BROKER_URL: amqp://incidentops:incidentops@localhost:5672//

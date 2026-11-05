@@ -1,6 +1,6 @@
 # Seven increments, with explicit boundaries
 
-Only increment 1 is implemented. The eventual product is a multi-tenant incident investigator with read-only diagnostics and approval-controlled actions against a separate simulator. Do not infer implemented guarantees from this roadmap.
+The original baseline, S1 and the **v2 durable workflow/retrieval foundation** are implemented. See the [v2 guide](guides/production-s2-s3.md) for actual behavior: background ingestion/answer jobs, generations, worker recovery, BM25/RRF, vector adapters and progress SSE. Semantic reranking, calibrated judges, shared Redis quotas, durable LangGraph investigations and approved simulator actions remain later work. The active [production design](production-design.md) and [execution plan](plans/production-evolution/2026-11-05-execplan.md) track that distinction. Do not infer implemented guarantees from the original learning exercises below.
 
 ## Increment 1 — Grounded baseline: implemented
 
@@ -8,11 +8,11 @@ Typed source corpus, dense retrieval, two tenants, basic document ACLs/date/stat
 
 Acceptance: inspect quoted evidence, reject invalid grounding, run offline evaluation, identify fake results as plumbing-only. Actual verification is in [verification.md](verification.md).
 
-## Increment 2 — Retrieval laboratory: planned
+## Increment 2 — Retrieval laboratory: partially implemented in v2
 
 Compare fixed-token and structure-aware chunks, table/header preservation, parent expansion and embedding models. Add BM25 over the already-authorized corpus, dense/sparse reciprocal rank fusion, a reranker, version/release metadata selection and one bounded query rewrite.
 
-BM25 is a lexical relevance algorithm; SQL full-text ranking is not automatically BM25. RRF combines ranked candidate lists without pretending their raw scores are calibrated. Reranking scores a small candidate set more deeply, adding latency and model dependence.
+V2 implements bounded BM25/dense RRF, exact content deduplication, candidate/final k and an optional reranker port. Semantic reranking, query rewriting and embedding-model comparisons remain planned. BM25 is a lexical relevance algorithm; SQL full-text ranking is not automatically BM25. RRF combines ranked lists without treating raw scores as calibrated.
 
 Failure exercise: an exact error identifier and a compatibility prerequisite require different evidence units. Gate on required evidence coverage at fixed candidate/context budgets; compare dense-only, hybrid, reranked and rewritten variants with generator held fixed. Measure embedding choices in separate experiments. Add ADR 0002 and exact experiment commands before implementation.
 
@@ -40,7 +40,7 @@ Failure exercise: simulator rollback succeeds, worker crashes before recording c
 
 ## Increment 6 — Performance and resilience: planned
 
-Add SSE progress streaming while withholding unsupported final claims. Add Redis only here for scoped caches keyed by tenant, principal/policy revision, corpus snapshot and model/prompt configuration. Test revocation invalidation. Add bounded retries/backoff, evaluated fallbacks, circuit breakers, admission limits and cancellation.
+V2 already adds durable SSE progress, retries/backoff, process bulkheads, request bounds and cancellation. Token streaming, evaluated fallbacks, circuit breakers and distributed admission remain planned. Add Redis for scoped caches keyed by tenant, principal/policy revision, corpus snapshot and model/prompt configuration; test revocation invalidation.
 
 Add reviewed long-term memory with provenance, ownership, expiry, correction and deletion. Never promote a generated hypothesis into authoritative knowledge automatically.
 

@@ -1,5 +1,7 @@
 # Verification record — increment 1
 
+Historical v1 evidence. The current implementation and fresh workflow results are described in [v2 verification](verification-v2.md); the old first-increment stopping boundary below is superseded by the [active plan](plans/production-evolution/2026-11-05-execplan.md).
+
 Verified on **2026-11-03** in the requested checkout. Environment: macOS 26.7.1, Apple Silicon, Python 3.12.13, uv 0.12.1. This record distinguishes executed checks from supplied but untested integration paths.
 
 ## Executed checks

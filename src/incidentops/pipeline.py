@@ -17,9 +17,9 @@ from incidentops.models import (
     Principal,
     Question,
 )
+from incidentops.ports import Retriever, SourceReader
 from incidentops.providers import PROMPT_VERSION, Generator, render_context
 from incidentops.security import redact, token_upper_bound
-from incidentops.store import Store
 from incidentops.tracing import TraceSink
 
 
@@ -34,7 +34,7 @@ class RAGState(TypedDict, total=False):
 class RAGService:
     def __init__(
         self,
-        store: Store,
+        store: SourceReader,
         embeddings: Embeddings,
         generator: Generator,
         *,
@@ -42,14 +42,15 @@ class RAGService:
         top_k: int,
         context_tokens: int,
         trace_sink: TraceSink,
+        retriever: Retriever,
     ):
         self.store, self.embeddings, self.generator = store, embeddings, generator
         self.mode, self.top_k, self.context_tokens = mode, top_k, context_tokens
         self.trace_sink = trace_sink
+        self.retriever = retriever
 
     def retrieve(self, principal: Principal, request: Question) -> list[Evidence]:
-        vector = self.embeddings.embed_query(redact(request.question))
-        return self.store.search(principal, request, vector, self.top_k)
+        return self.retriever.retrieve(principal, request)
 
     def ask(self, principal: Principal, request: Question) -> Assessment:
         started = time.perf_counter()

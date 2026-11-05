@@ -1,5 +1,7 @@
 # IncidentOps Implementation Plan
 
+Completed historical v1 plan. The [active production plan](../production-evolution/2026-11-05-execplan.md) tracks current work; this record remains for the original test/decision history.
+
 **Goal:** Deliver the first runnable, documented increment of the supplied IncidentOps proposal.
 
 **Architecture:** A Python package exposes a CLI and FastAPI. A three-node LangGraph composes filtered retrieval, structured generation and deterministic quotation validation. Store and provider protocols allow SQLite/fake tests and PostgreSQL/OpenAI deployment.

@@ -5,7 +5,9 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable
 COPY data ./data
-RUN useradd --create-home appuser && chown -R appuser:appuser /app
+COPY migrations ./migrations
+COPY alembic.ini ./
+RUN useradd --create-home appuser && mkdir -p /app/.local/objects && chown -R appuser:appuser /app
 USER appuser
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000

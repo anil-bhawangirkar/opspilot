@@ -1,119 +1,165 @@
-# High-level architecture
+# Current architecture: v2 durable RAG
 
-## Product boundary
+This describes implemented v2 code as of 2026-11-05. The [production design](production-design.md) describes additional target controls, and [verification](verification-v2.md) states what actually ran. V1 is retained in the [legacy guide](guides/legacy-v1.md).
 
-The operator asks a documentation question about NimbusCloud publication failures. Acme's PUB-403 runbook describes a missing publish permission; Bravo's describes the wrong namespace. Returning Bravo's plausible explanation to Acme would be both a correctness and an isolation failure.
+## Product and trust boundaries
 
-Increment 1 searches static knowledge. It can answer “What prerequisite does the runbook give for rollback?” It cannot answer “Has this migration completed?” or “What caused today's incident?”. There are no live tools or recovery actions yet.
+An operator investigates NimbusCloud publication failures using static, versioned sources. Acme's PUB-403 runbook describes missing publish permission; Bravo's describes a wrong namespace. Similar text never grants access to another tenant's evidence.
 
-## Components
+The system can answer what a runbook says. It cannot observe today's migration state or execute a recovery action. Live diagnostic tools, a separate simulator and persistent agent investigations remain later stages. V2 currently uses an explicit async workflow runner; the small LangGraph in `pipeline.py` belongs to v1.
+
+## Component flow
 
 ```mermaid
 flowchart TD
-    Operator[Operator] --> API[FastAPI and token authentication]
-    API --> Service[RAG service]
-    Service --> Graph[LangGraph workflow]
-    Graph --> Retrieval[Filtered dense retrieval]
-    Retrieval --> Store[PostgreSQL and pgvector]
-    Graph --> Generation[LangChain structured quote selection]
-    Generation --> Model[Fake selector or OpenAI model]
-    Graph --> Validation[Quote and authorization validation]
-    Validation --> Response[Assessment and citations]
-    Service --> Telemetry[Allowlisted LangSmith summaries]
-    Ingestion[Operator ingestion CLI] --> Redaction[Redact and chunk]
-    Redaction --> Embeddings[Fake or OpenAI embeddings]
-    Embeddings --> Store
+    Client[Client with configured bearer token] --> API[Async workflow API]
+    API --> Identity[Trusted principal and scope]
+    Identity --> Objects[Immutable redacted artifacts]
+    Identity --> DB[Jobs outbox active heads and source metadata]
+    DB --> Dispatch[Dispatcher and lease recovery]
+    Dispatch --> Broker[RabbitMQ UUID-only messages]
+    Broker --> Small[Small ingestion pool]
+    Broker --> Large[Large ingestion pool]
+    Broker --> Answers[Answer pool]
+    Small --> Ingest[Chunk and embed staged batches]
+    Large --> Ingest
+    Ingest --> Objects
+    Ingest --> DB
+    Ingest --> Vectors[Local exact or pgvector or Pinecone]
+    Answers --> Retrieve[Shared hybrid retrieval module]
+    ReadAPI[Optional retrieval-only API] --> Retrieve
+    Retrieve --> DB
+    Retrieve --> Vectors
+    Retrieve --> BM25[Bounded authorized BM25]
+    Retrieve --> Evidence[Bounded authorized evidence]
+    Evidence --> Answers
+    Evidence --> ReadAPI
+    Answers --> Model[LangChain async structured generation]
+    Model --> Validate[Quote and current-access validation]
+    Validate --> DB
+    DB --> View[Authorized status sources and SSE progress]
+    View --> Client
+    Validate -. safe measurements .-> Trace[Optional LangSmith summaries]
 ```
 
-Plain-English summary: authenticated identity limits the database query, the provider selects quotes, code checks those quotes, and a separate telemetry boundary exports only allowlisted measurements. Offline execution replaces PostgreSQL with SQLite exact search and OpenAI with explicitly fake providers.
+## Diagram Summary
 
-| Component | Responsibility | Why separate it? |
+The relational store owns accepted work, document visibility and authorization metadata. Object storage preserves the redacted source representation. A broker notification contains a job ID, while a worker must claim a database lease before writing. Ingestion and answering have different pools. Retrieval merges dense and lexical candidates, and code validates evidence before results are released.
+
+The standalone retrieval-only API is an optional entry point to the same module. Workers do **not** call it over the network today. Model requests occur for answer generation; the retrieval-only endpoint returns evidence without generating an answer. The component diagram groups these capabilities; the sequences below show their distinct execution paths.
+
+## Deployment and ownership
+
+| Process / module | Responsibility | Entry point / lab port |
 |---|---|---|
-| `api.py` | Authenticate and validate HTTP requests | Tenant identity cannot come from model output or JSON fields |
-| `ingestion.py` | Load, redact and chunk versioned sources | Transformations are reproducible and independently testable |
-| `store.py` | Persist evidence; apply scope before ranking | Authorization stays visible in SQL |
-| `providers.py` | Embed text and select structured quotes | Change providers without changing access policy |
-| `pipeline.py` | Orchestrate retrieval, generation and validation | Explicit state and termination are understandable before agents |
-| `tracing.py` | Export safe measurements | Tracing cannot casually serialize the whole state |
-| `evaluation.py` | Compare results with references | Wrong abstentions and infrastructure failures remain visible |
+| Workflow API | Authentication, request bounds, artifact/job acceptance, status/cancel/source/SSE | `incidentops-workflow serve`; host default 8000, Compose 8002 |
+| Dispatcher | Eligible outbox publication, expiry/retry and lost-delivery reconciliation | `incidentops-workflow dispatch` |
+| Ingestion workers | Library splitting, checkpointed embeddings, idempotent vector upsert, generation promotion | Celery queues `ingestion.small` and `ingestion.large` |
+| Answer workers | Scoped retrieval, bounded async model request, validated persisted assessment | Celery queue `investigations` |
+| Retrieval-only API | Bounded `/v2/retrieve` and authorized source lookup | `incidentops-workflow serve-retrieval`; host 8001, Compose 8003 |
+| PostgreSQL | Job/source/access authority and batch checkpoints | Compose `db`, localhost 5432 |
+| Vector adapter | Candidate search only; source hydration stays relational | Local exact, pgvector or Pinecone |
+| Object adapter | Immutable source bytes and exact version/hash reference | Local volume or opt-in S3 |
 
-## Request sequence
+Compose starts schema/index initialization before workflow processes. It provides single PostgreSQL/RabbitMQ instances and a shared local object volume. Async code, restart policies and durable queues do not establish multi-zone availability. See [setup](guides/production-s2-s3.md) for commands and [production design](production-design.md) for HA requirements.
+
+## Ingestion sequence
 
 ```mermaid
 sequenceDiagram
-    participant O as Operator
-    participant A as API
-    participant R as RAG graph
-    participant D as Scoped store
-    participant M as Quote selector
-    O->>A: Question and bearer token
-    A->>A: Resolve immutable principal
-    A->>R: Validated question and trusted identity
-    R->>R: Redact question
-    R->>D: Dense query with tenant and metadata scope
-    D-->>R: Authorized current chunks
-    R->>R: Pack evidence within budget
-    R->>M: Redacted question and evidence JSON
-    M-->>R: Structured answerable flag and quotes
-    R->>D: Recheck cited sources and access
-    R->>R: Validate exact quote support
-    R-->>A: Assessment or abstention
-    A-->>O: JSON with stable citation URLs
+    participant C as Client
+    participant A as Workflow API
+    participant O as Object store
+    participant D as Relational DB
+    participant P as Dispatcher
+    participant B as RabbitMQ
+    participant W as Ingestion worker
+    participant E as Embeddings
+    participant V as Vector index
+    C->>A: POST ingestion job and idempotency key
+    A->>A: Authenticate, validate and redact
+    A->>O: Store immutable redacted artifact
+    O-->>A: Exact version, size and SHA-256
+    A->>D: Capture head revision; commit job and outbox
+    D-->>A: Existing or newly accepted job
+    A-->>C: 202 and polling Location
+    P->>D: Recover leases; read eligible outbox
+    P->>B: Publish job UUID to selected queue
+    B-->>P: Publisher confirmation
+    P->>D: Mark outbox published
+    B->>W: Deliver UUID, possibly more than once
+    W->>D: Atomic claim, attempt and fencing token
+    W->>O: Read pinned artifact and verify checksum
+    W->>W: Split with pinned LangChain profile
+    W->>D: Begin invisible staging generation
+    loop Bounded batches under heartbeat and deadline
+        W->>D: Load checkpoint and scoped embedding cache
+        opt Missing embeddings
+            W->>E: Native async embedding request
+            E-->>W: Vectors
+            W->>D: Commit batch, checksum and derived cache
+        end
+        W->>V: Idempotent generation/chunk upsert
+    end
+    W->>D: Verify fence and completeness; CAS active head and succeed
+    C->>A: Poll job or replay progress events
+    A->>D: Authorized job/result lookup
+    A-->>C: Current status and safe result
 ```
 
-Plain-English summary: retrieval and response validation both enforce policy. If the context cannot fit evidence or the provider fails, the graph terminates with a specific abstention reason.
+An object upload and DB acceptance are separate transactions. A crash can leave an orphan artifact. A broker confirmation means acceptance by the broker, not job completion. Batch persistence precedes vector upsert so an interrupted upsert can repeat without repeating an already recorded embedding request. A provider response lost before its checkpoint can still be billed twice.
 
-## Why these technologies?
+Only the final relational transaction switches one document's head and marks ingestion successful. A revision conflict preserves the existing active generation. Other documents and tenants are not replaced. Pinecone acknowledgement does not guarantee immediate dense query visibility; that readiness barrier remains future work.
 
-**LangChain** supplies provider interfaces, prompt composition and typed model output. Application policy stays in ordinary Python. This reduces provider coupling without hiding the security rules in a framework default.
+## Answer and retrieval sequence
 
-**LangGraph** makes the stages and conditional no-evidence branch explicit. A simple function could implement this increment with less overhead. The graph is used because later increments need branching and durable pauses; this version remains an acyclic workflow with no agent loop, reducer, memory or checkpointer to imply durability it does not have.
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as Workflow API
+    participant D as Relational DB
+    participant B as Dispatcher and broker
+    participant W as Answer worker
+    participant E as Query embeddings
+    participant V as Dense vector index
+    participant L as BM25 branch
+    participant M as Structured model
+    C->>A: POST answer job and idempotency key
+    A->>D: Commit redacted question, job and outbox
+    A-->>C: 202 and Location
+    B->>W: Deliver persisted job UUID
+    W->>D: Claim lease; load current authorized generations
+    alt No eligible evidence
+        W->>D: Persist insufficient-evidence assessment
+    else Eligible evidence exists
+        W->>E: Embed redacted query
+        par Scoped dense candidates
+            W->>V: Search permitted tenant and generations
+            V-->>W: Candidate IDs and scores
+        and Authorized lexical candidates
+            W->>L: BM25 over capped authorized text
+            L-->>W: Ranked IDs
+        end
+        W->>W: RRF, exact dedup, candidate/final k and context budget
+        W->>M: Propose evidence IDs and exact quotes
+        M-->>W: Untrusted structured draft
+        W->>D: Recheck source identity, permissions and quotes
+        W->>D: Fenced result/event commit
+    end
+    C->>A: GET job or events with cursor
+    A->>D: Revalidate stored citations and duplicate provenance
+    A-->>C: Assessment or withheld stale evidence
+```
 
-**PostgreSQL/pgvector** keeps source metadata and vectors in one transaction boundary. Exact cosine search is sufficient for this tiny corpus and provides a useful future reference for ANN experiments. There is no HNSW index or scaling claim. SQL prefilters are easier to inspect here than a generic vector-store abstraction; the LangChain embedding interface remains reusable.
+The standalone `/v2/retrieve` endpoint performs the search portion under a request timeout and returns evidence; it does not enqueue an answer or call the chat model. Reranking is an optional validated port, disabled in the supplied runtime. SSE streams durable **progress events**, not model token fragments. The [retrieval lab](guides/retrieval-lab.md) explains ranking and quality experiments.
 
-**SQLite and fake providers** let you debug the controls without infrastructure or paid calls. They do not prove PostgreSQL equivalence, semantic retrieval quality or LLM reasoning. A real PostgreSQL CI job and an opt-in live path are distinct verification layers.
+## Isolation and failure rules
 
-**LangSmith** receives measurements through an explicit export boundary. Full automatic traces would expose more intermediate state and make debugging easier; this version deliberately reduces exported content. No remote tracing happens by default.
+- Trusted tenant/principal/groups come from the server's token adapter, never model output or arbitrary tenant headers. Group snapshots are a demo limitation; global identity revocation needs a production identity service.
+- Query scope includes current nondeleted generation, document ACL, source date/status, service/region/release and embedding profile. Dense results hydrate only from that authorized set.
+- Worker writes require the current fence, live lease and unexpired deadline. Repeated deliveries cannot create a second active owner. Cancellation and recovery revoke old ownership.
+- Stored answers are checked again when polled. Revoked/replaced sources invalidate release; duplicate provenance is separately filtered.
+- Redaction precedes object persistence, embeddings, model input and diagnostics. Automatic raw tracing is disabled; only allowlisted summaries are exported.
+- Separate pools, bounded request/context/batch sizes, finite retries and deadlines are implemented. Global provider quotas, bounded backlog, fair scheduling, circuit breakers and cost reservations remain planned.
 
-## Data ownership and consistency
-
-Source IDs include tenant, document identity, version, chunk ordinal and redacted text hash before SHA-256 hashing. The database stores redacted chunks and hashes. Reusing a source version with different redacted text fails; full-corpus replacement commits atomically after all embeddings succeed.
-
-Access changes are reflected by reingestion. Removed, revoked or superseded sources return 404 from citation lookup. Old citation IDs remain deterministic, but this increment does not promise permanent access to archived versions. Long-lived audit citations require an immutable archive with independent authorization, planned later.
-
-The application rechecks retrieved metadata and claims before returning them. These checks reduce exposure from concurrent ingestion; they do not create a globally atomic authorization snapshot across a database, model provider and HTTP response. Production revocation semantics need a documented policy revision or transactional snapshot strategy.
-
-## Quality boundaries
-
-- An exact quote can be irrelevant, misleading out of context or wrong in its source. Textual validation is not semantic entailment or a hallucination-detection score.
-- Answerability is a provider judgment. Deterministic code forces abstention on missing context and invalid grounding, but it cannot know that every plausible quote answers the question.
-- Synthetic fixtures expose specific failure modes; the fake selector knows a few scripted intents. Its evaluation scores are plumbing results.
-- There are eight source files and ten evaluation cases. These are starting exercises, not a representative distribution.
-- No real operational evidence enters the system. A source describing a permission failure is not proof that the current incident has that cause.
-
-## Scaling discussion for interviews
-
-The present workload is one developer and a tiny corpus. No concurrency, throughput, availability, quality or cost SLO has been measured. Establish a real workload before choosing targets.
-
-| Pressure | Current choice | What changes at scale and why |
-|---|---|---|
-| More documents | Exact filtered vector search | Benchmark ANN against exact neighbors and evidence recall; selective ACL filters affect ANN behavior |
-| Many requests | Sync endpoints in FastAPI threadpool, per-call DB connections | Add connection pools, bounded concurrency, admission control and cancellation |
-| Expensive embeddings | Full corpus embedding before replacement | Add content-addressed, tenant-scoped embedding reuse and incremental indexes |
-| Provider outages | Finite timeout and one retry, explicit abstention | Add circuit breakers and evaluated provider fallbacks; never fake a successful response |
-| Access revocation | Reingest and recheck before release | Version authorization policy; invalidate caches and memory against that revision |
-| Long investigations | None in increment 1 | Durable worker, typed evidence reducers, checkpoints and bounded diagnostic budgets |
-| Unsafe recovery | No action path | Exact-plan approvals, downstream idempotency and reconciliation in a simulator |
-| Privacy | Synthetic data, limited regex redaction, minimal traces | Classifiers/DLP, retention, encryption, access review and adversarial evaluation |
-
-A production system would separate migration privileges from the runtime DB role and use schema migrations, OIDC, row-level security, managed secrets, backup/restore tests and workload-specific monitoring. Those are explicit future requirements, not consequences of using Docker.
-
-## Official API references checked
-
-- [LangChain ChatOpenAI integration](https://docs.langchain.com/oss/python/integrations/chat/openai): structured model output adapter.
-- [LangGraph graph API](https://docs.langchain.com/oss/python/langgraph/graph-api): typed state, conditional edges and compilation.
-- [LangSmith sensitive-data controls](https://docs.langchain.com/langsmith/mask-inputs-outputs): hide/mask trace payloads.
-- [pgvector](https://github.com/pgvector/pgvector): exact search, cosine operator and image tags.
-- [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs) and [embeddings](https://developers.openai.com/api/docs/guides/embeddings): live adapter contracts.
-
-Checked 2026-11-03; the resolved SDK versions are in `uv.lock`. Account model availability and remote service behavior must still be tested locally.
+See [low-level design](low-level-design.md) for exact tables and state transitions, [ADR 0003](adr/0003-durable-jobs-and-generations.md) for alternatives, and [verification](verification-v2.md) for actual evidence.

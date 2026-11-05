@@ -6,5 +6,9 @@ results
 __pycache__
 .pytest_cache
 .ruff_cache
+dist
+build
+.idea
+.DS_Store
 tests
 docs

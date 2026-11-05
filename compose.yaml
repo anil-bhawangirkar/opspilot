@@ -1,3 +1,40 @@
+x-workflow-env: &workflow-env
+  INCIDENTOPS_PROVIDER: ${INCIDENTOPS_PROVIDER:-fake}
+  INCIDENTOPS_WORKFLOW_DATABASE_URL: postgresql+asyncpg://incidentops:incidentops@db:5432/incidentops
+  INCIDENTOPS_VECTOR_BACKEND: ${INCIDENTOPS_VECTOR_BACKEND:-pgvector}
+  INCIDENTOPS_VECTOR_DATABASE_URL: postgresql://incidentops:incidentops@db:5432/incidentops
+  INCIDENTOPS_OBJECT_BACKEND: ${INCIDENTOPS_OBJECT_BACKEND:-local}
+  INCIDENTOPS_OBJECT_ROOT: /app/.local/objects
+  INCIDENTOPS_BROKER_URL: amqp://incidentops:incidentops@rabbitmq:5672//
+  INCIDENTOPS_HNSW: ${INCIDENTOPS_HNSW:-true}
+  INCIDENTOPS_VECTOR_EXACT: ${INCIDENTOPS_VECTOR_EXACT:-false}
+  INCIDENTOPS_HNSW_EF_SEARCH: ${INCIDENTOPS_HNSW_EF_SEARCH:-100}
+  INCIDENTOPS_ACME_TOKEN: ${INCIDENTOPS_ACME_TOKEN:-acme-demo-token}
+  INCIDENTOPS_BRAVO_TOKEN: ${INCIDENTOPS_BRAVO_TOKEN:-bravo-demo-token}
+  INCIDENTOPS_CHAT_MODEL: ${INCIDENTOPS_CHAT_MODEL:-gpt-4.1-mini}
+  INCIDENTOPS_EMBEDDING_MODEL: ${INCIDENTOPS_EMBEDDING_MODEL:-text-embedding-3-small}
+  INCIDENTOPS_EMBEDDING_DIMENSIONS: ${INCIDENTOPS_EMBEDDING_DIMENSIONS:-1536}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+  INCIDENTOPS_PINECONE_HOST: ${INCIDENTOPS_PINECONE_HOST:-}
+  INCIDENTOPS_S3_BUCKET: ${INCIDENTOPS_S3_BUCKET:-}
+  INCIDENTOPS_TRACING: ${INCIDENTOPS_TRACING:-false}
+  LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+  INCIDENTOPS_CHUNK_SIZE_CHARS: ${INCIDENTOPS_CHUNK_SIZE_CHARS:-350}
+  INCIDENTOPS_CHUNK_OVERLAP_CHARS: ${INCIDENTOPS_CHUNK_OVERLAP_CHARS:-40}
+  INCIDENTOPS_EMBEDDING_BATCH_SIZE: ${INCIDENTOPS_EMBEDDING_BATCH_SIZE:-32}
+  INCIDENTOPS_INGESTION_MAX_CHUNKS: ${INCIDENTOPS_INGESTION_MAX_CHUNKS:-2000}
+  INCIDENTOPS_DENSE_K: ${INCIDENTOPS_DENSE_K:-40}
+  INCIDENTOPS_LEXICAL_K: ${INCIDENTOPS_LEXICAL_K:-40}
+  INCIDENTOPS_RERANK_K: ${INCIDENTOPS_RERANK_K:-20}
+  INCIDENTOPS_FINAL_K: ${INCIDENTOPS_FINAL_K:-5}
+x-workflow-service: &workflow-service
+  image: incidentops-local:dev
+  build: .
+  environment: *workflow-env
+  volumes:
+    - workflow_objects:/app/.local/objects
+
 services:
   db:
     image: pgvector/pgvector:0.8.7-pg17-bookworm
@@ -28,10 +65,97 @@ services:
       INCIDENTOPS_TRACING: ${INCIDENTOPS_TRACING:-false}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       INCIDENTOPS_TRACE_PROJECT: ${INCIDENTOPS_TRACE_PROJECT:-incidentops-increment-1}
+      INCIDENTOPS_CHUNK_SIZE_CHARS: ${INCIDENTOPS_CHUNK_SIZE_CHARS:-350}
+      INCIDENTOPS_CHUNK_OVERLAP_CHARS: ${INCIDENTOPS_CHUNK_OVERLAP_CHARS:-40}
+      INCIDENTOPS_EMBEDDING_BATCH_SIZE: ${INCIDENTOPS_EMBEDDING_BATCH_SIZE:-32}
+      INCIDENTOPS_INGESTION_MAX_CHUNKS: ${INCIDENTOPS_INGESTION_MAX_CHUNKS:-2000}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
+  rabbitmq:
+    profiles: [workflows]
+    image: rabbitmq:4.1-management
+    environment:
+      RABBITMQ_DEFAULT_USER: incidentops
+      RABBITMQ_DEFAULT_PASS: incidentops
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  workflow-init:
+    <<: *workflow-service
+    profiles: [workflows]
+    command: [sh, -c, "incidentops-workflow migrate && incidentops-workflow index-init"]
+    depends_on:
+      db:
+        condition: service_healthy
+  workflow-api:
+    <<: *workflow-service
+    profiles: [workflows]
+    command: [incidentops-workflow, serve, --host, 0.0.0.0]
+    ports:
+      - "127.0.0.1:8002:8000"
+    depends_on:
+      workflow-init:
+        condition: service_completed_successfully
+  retrieval:
+    <<: *workflow-service
+    profiles: [workflows]
+    command: [incidentops-workflow, serve-retrieval, --host, 0.0.0.0]
+    ports:
+      - "127.0.0.1:8003:8001"
+    depends_on:
+      workflow-init:
+        condition: service_completed_successfully
+  dispatcher:
+    <<: *workflow-service
+    profiles: [workflows]
+    command: [incidentops-workflow, dispatch]
+    restart: unless-stopped
+    depends_on:
+      workflow-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+  ingest-small:
+    <<: *workflow-service
+    profiles: [workflows]
+    command: [celery, -A, "incidentops.durable.broker:app", worker, -Q, ingestion.small, --concurrency=2, --loglevel=WARNING, --hostname=ingest-small@%h]
+    restart: unless-stopped
+    depends_on:
+      workflow-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+  ingest-large:
+    <<: *workflow-service
+    profiles: [workflows]
+    command: [celery, -A, "incidentops.durable.broker:app", worker, -Q, ingestion.large, --concurrency=1, --loglevel=WARNING, --hostname=ingest-large@%h]
+    restart: unless-stopped
+    depends_on:
+      workflow-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+  investigations:
+    <<: *workflow-service
+    profiles: [workflows]
+    command: [celery, -A, "incidentops.durable.broker:app", worker, -Q, investigations, --concurrency=2, --loglevel=WARNING, --hostname=investigations@%h]
+    restart: unless-stopped
+    depends_on:
+      workflow-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 volumes:
   pgdata:
+  rabbitdata:
+  workflow_objects:

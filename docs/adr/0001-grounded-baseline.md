@@ -2,6 +2,8 @@
 
 **Status:** Accepted for increment 1. **Date:** 2026-11-03.
 
+Historical record: manual paragraph splitting and concrete ingestion/retrieval coupling are superseded by [ADR 0002](0002-library-chunking-and-service-boundaries.md), 2026-11-05. The current production direction is in `docs/production-design.md`; this ADR explains the original baseline.
+
 ## Context
 
 The project is a production-style learning POC, not an operational deployment. The learner needs to explain why a RAG answer is supported, why another tenant's evidence is inaccessible and why uncertainty can be a valid outcome. The supplied brief explicitly asks to stop after the first increment.

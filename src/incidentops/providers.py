@@ -54,6 +54,12 @@ class FakeEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self.embed_query(text) for text in texts]
 
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_documents(texts)
+
+    async def aembed_query(self, text: str) -> list[float]:
+        return self.embed_query(text)
+
 
 class FakeGenerator:
     """Small scripted selector for offline exercises; deliberately no general reasoning ability."""
@@ -88,9 +94,12 @@ class FakeGenerator:
                         )
         return Draft(answerable=False, claims=[])
 
+    async def agenerate(self, question: str, evidence: list[Evidence]) -> Draft:
+        return self.generate(question, evidence)
+
 
 class OpenAIGenerator:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, http_client=None, http_async_client=None):
         model = ChatOpenAI(
             model=settings.chat_model,
             temperature=0,
@@ -98,6 +107,8 @@ class OpenAIGenerator:
             max_retries=settings.max_retries,
             max_tokens=700,
             api_key=settings.openai_api_key.get_secret_value(),
+            http_client=http_client,
+            http_async_client=http_async_client,
         )
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -110,11 +121,25 @@ class OpenAIGenerator:
     def generate(self, question: str, evidence: list[Evidence]) -> Draft:
         return self.chain.invoke({"question": question, "evidence": render_context(evidence)})
 
+    async def agenerate(self, question: str, evidence: list[Evidence]) -> Draft:
+        return await self.chain.ainvoke(
+            {"question": question, "evidence": render_context(evidence)}
+        )
+
 
 def make_providers(settings: Settings) -> tuple[Embeddings, Generator, str, int]:
+    embeddings, identity, dimensions = make_embeddings(settings)
+    generator = FakeGenerator() if settings.provider == "fake" else OpenAIGenerator(settings)
+    return embeddings, generator, identity, dimensions
+
+
+def make_embeddings(
+    settings: Settings, *, http_client=None, http_async_client=None
+) -> tuple[Embeddings, str, int]:
+    """Ingestion and retrieval can construct embeddings without initializing a chat model."""
     if settings.provider == "fake":
         fake = FakeEmbeddings()
-        return fake, FakeGenerator(), fake.identity, fake.dimensions
+        return fake, fake.identity, fake.dimensions
     if settings.openai_api_key is None or not settings.openai_api_key.get_secret_value():
         raise ValueError("OPENAI_API_KEY is required for the opt-in live provider")
     embeddings = OpenAIEmbeddings(
@@ -124,6 +149,8 @@ def make_providers(settings: Settings) -> tuple[Embeddings, Generator, str, int]
         max_retries=settings.max_retries,
         check_embedding_ctx_length=False,  # Bounded chunks, no tokenizer download on offline runs.
         api_key=settings.openai_api_key.get_secret_value(),
+        http_client=http_client,
+        http_async_client=http_async_client,
     )
     identity = f"openai:{settings.embedding_model}:{settings.embedding_dimensions}"
-    return embeddings, OpenAIGenerator(settings), identity, settings.embedding_dimensions
+    return embeddings, identity, settings.embedding_dimensions

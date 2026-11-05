@@ -44,6 +44,7 @@ class Chunk(SourceDocument):
     document_hash: str
     start_offset: int
     end_offset: int
+    splitter_profile: str = "legacy-paragraph-v1"
 
 
 class Evidence(StrictModel):
